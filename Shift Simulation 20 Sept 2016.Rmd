@@ -1,0 +1,138 @@
+---
+title: "Shift Update 20 September 2016"
+author: "Kevin Little"
+date: "September 20, 2016"
+output: html_document
+---
+
+This R script uses simulation to estimate the probability of signals in a run chart.  
+
+For the "shift rule", we estimate the probability of seeing k consecutive values above or below the median in a series of independent observations of length n.   We model observations above the median with the value +1 and observations below the median with the value -1.
+
+```{r Set seed}
+set.seed(1234)
+
+```
+
+```{r Functions}
+
+
+#Functions needed for the simulations
+
+#functions to estimate probability of a sequence of consecutive values on one side of the median:  shift rules
+
+#Function 1:  vec_maker
+#make a vector of n/2 1's and n/2 -1s. Input value nl should be even
+vec_maker <- function(nl){
+  vec0 <- c(rep(1,nl/2),rep(-1,nl/2))
+}
+
+#Function 2: vec_permute
+#take a vector of nl/2 1's and nl/2 -1s and randomly permute the entries.
+vec_permute <- function(vec_input,nl){
+  vec1 <- sample(vec_input,nl,replace=FALSE)
+}
+
+#Function 3: df_maker_perm
+#function to make a data frame with a given number of columns, each a permuted vector of -1s and +1s, the exact
+#position of the base vector determined by the model parameter
+#("zero" or "B" determines the set up of the base vector to equal number +1s and -1s or a set of Bernouilli variable
+#(p=.5)
+df_maker_perm <- function(num_of_cols,nn,model) {
+  if(model=="zero") {
+    base_vec <- vec_maker(nn)
+    df1 <- vec_permute(base_vec,nn)
+    for(i in 2:num_of_cols){
+      df1 <- cbind.data.frame(df1,vec_permute(base_vec,nn))
+    }
+  } else if(model=="B") {
+    df1 <- as.integer(gsub("0","-1",as.character(rbinom(nn,1,0.5))))
+    for(i in 2:num_of_cols){
+      df1 <- cbind.data.frame(df1,as.integer(gsub("0","-1",as.character(rbinom(nn,1,0.5)))))
+    }
+  }
+  names(df1) <- paste0("v",c(1:num_of_cols))
+  return(df1)
+}
+
+#Function 4:  count_one_sid
+#takes a vector of +1s and -1s and counts the number of times there are more than
+#k-1 consecutive -1s or +1s
+count_one_side <- function(x2,k) {
+  n <- length(x2)
+  index <- 0
+  for(j in 1:(n-k+1)) {
+    vsub <- x2[j:(j+k-1)]
+    if(abs(sum(vsub))==k) {
+      index <- 1+index
+    } 
+  }
+  return(index)
+}
+
+#Function 5:   count_non_zero
+#function to convert the runs count vector to just presence or absence of at least one run of at least length k
+count_non_zero <-function(x){
+  if(x>0){
+    cnz <- 1
+  } else {
+    cnz <- 0
+  }
+}
+
+#Function 6: pct_trials out
+#function to output a result of trials with vectors of length nl and run of
+#length k_one_side, using the fact that a dataframe is a list of columns, use lapply to apply the
+#count runs function to the columns and assemble the answer into a vector.  Then use count_non_zero and sapply 
+#to convert any non-zero count of runs to the value 1 to compute the percent of vectors with at least one run 
+#of length k.
+pct_trials_out <- function(ntrials,nl,k_one_side,model) {
+  dfx <- df_maker_perm(ntrials,nl,model)
+  count_all <- unlist((lapply(dfx,count_one_side,k=k_one_side)))
+  count_gt0 <- sapply(count_all,count_non_zero)
+  pct_out <- sum(count_gt0)/ntrials
+} 
+
+
+
+```
+
+
+```{r Simulate shift probabilities}
+library(htmlTable)
+#Define the series lengths--note all lengths are even because odd series will have at
+#least one value on the median.
+nvalsE <- seq(12,48,2)
+#calculate the critical value for number of consecutive values on one side of the median
+#reference:  Anhøj and Olesen (2014), "Run Charts Revisited: A Simulation Study of Run Chart #Rules for Detection of Non-Random Variation in Health Care Processes" (PLOS One, http://dx.doi.org/10.1371/journal.pone.0113825).
+crit_val <- round(log2(nvalsE) + 3)
+
+#here are the Anhøj and Olesen unique critical values for the series lengths in vector nvalsE
+unique(crit_val)
+
+#since our series lengths start with 12 there is no way to have a shift of 7 or 8 on one side of the median of the series.
+#thus, let's prepend a shift of 6, which corresponds to the fixed rule proposed by Perla et al (2011)
+
+shift_vals <- c(6, unique(crit_val))
+
+#define a function that will estimate the probability of seeing a shift of k 
+#consecutive values for each series length defined by vector nvals
+test_shift <- function(shift_k,nvals=nvalsE,ntrials1=10000) {
+    test1 <- sapply(nvals,pct_trials_out,ntrials=ntrials1,k=shift_k, model="zero")
+}
+
+#use the test_shift function to create a table of probabilities, columns defined by the critical values
+shift_out <- as.data.frame(sapply(shift_vals,test_shift))
+colnames(shift_out) <- c("6","7","8","9")
+shift_out <- cbind.data.frame(nvalsE,shift_out,crit_val)
+names(shift_out)[1] <- "Series Length"
+names(shift_out)[6] <- "Shift Length"
+shift_out[,c(2:5)] <- round(shift_out[,c(2:5)],3)
+
+#now print the table
+htmlTable(shift_out,
+          rnames=FALSE, 
+          css.cell = "padding-left: .5em; padding-right: .2em;",
+          tfoot = "Table entries generated from 10,000 replications")
+```
+
